@@ -1,4 +1,4 @@
-# GeoAI AI & Data Agent
+# PIA GeoVision Analytics & Data Agent
 
 Solución reproducible para la evaluación de Ingeniería de Datos e IA. Integra los servicios
 proporcionados sin modificarlos y construye un servidor MCP, un agente FastAPI, un pipeline
