@@ -1,0 +1,176 @@
+name: geoai-evaluation
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gen_ai_agent_db}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-gen_ai_agent_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  location-service:
+    build:
+      context: ..
+      dockerfile: Dockerfile.location-service
+    environment:
+      LOCATION_SERVICE_PORT: 8001
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "8003"]
+    environment:
+      LOCATION_SERVICE_URL: http://location-service:8001
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8003:8003"
+    depends_on:
+      location-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_user}:${POSTGRES_PASSWORD:-agent_password}@postgres:5432/${POSTGRES_DB:-gen_ai_agent_db}
+      MCP_SERVER_URL: http://mcp-server:8003/mcp
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  transaction-service:
+    build:
+      context: ..
+      dockerfile: Dockerfile.transaction-service
+    environment:
+      TRANSACTION_SERVICE_PORT: 8002
+      AGENT_ENDPOINT: http://agent:8000/transactions
+      TRANSACTION_SERVICE_INTERVAL: ${TRANSACTION_SERVICE_INTERVAL:-5}
+    ports:
+      - "8002:8002"
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "pipeline.run"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_user}:${POSTGRES_PASSWORD:-agent_password}@postgres:5432/${POSTGRES_DB:-gen_ai_agent_db}
+      MCP_SERVER_URL: http://mcp-server:8003/mcp
+      MAX_ENRICHMENT_ATTEMPTS: ${MAX_ENRICHMENT_ATTEMPTS:-3}
+      PIPELINE_INTERVAL_SECONDS: ${PIPELINE_INTERVAL_SECONDS:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agent:
+        condition: service_started
+      mcp-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [geoai]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_user}:${POSTGRES_PASSWORD:-agent_password}@postgres:5432/${POSTGRES_DB:-gen_ai_agent_db}
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pipeline:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [geoai]
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    profiles: ["tools"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@genai.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [geoai]
+
+volumes:
+  postgres_data:
+
+networks:
+  geoai:
+    driver: bridge

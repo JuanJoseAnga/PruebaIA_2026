@@ -1,0 +1,43 @@
+[project]
+name = "geoai-candidate-solution"
+version = "1.0.0"
+description = "Production-style replacement agent for the GeoAI data and AI evaluation"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi==0.116.1",
+    "groq==1.7.0",
+    "httpx==0.28.1",
+    "mcp==2.2.0",
+    "pandas==2.3.2",
+    "plotly==6.3.0",
+    "psycopg[binary]==3.2.10",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.10,<3",
+    "sqlalchemy==2.0.43",
+    "streamlit==1.49.1",
+    "tenacity==9.1.2",
+    "uvicorn[standard]==0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.1.0",
+    "ruff==0.12.12",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
