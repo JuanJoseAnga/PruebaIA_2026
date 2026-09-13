@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: gen-ai-agent-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gen_ai_agent_db}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-gen_ai_agent_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gen-ai-network
+
+  # Location Service (PROVIDED - Simulated data source)
+  location-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.location-service
+    container_name: gen-ai-location-service
+    environment:
+      LOCATION_SERVICE_PORT: ${LOCATION_SERVICE_PORT:-8001}
+    ports:
+      - "${LOCATION_SERVICE_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gen-ai-network
+
+  # Transaction Service (PROVIDED - Simulated transaction generator)
+  transaction-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.transaction-service
+    container_name: gen-ai-transaction-service
+    environment:
+      TRANSACTION_SERVICE_PORT: ${TRANSACTION_SERVICE_PORT:-8002}
+      AGENT_ENDPOINT: ${AGENT_ENDPOINT:-http://agent:8000/transactions}
+      TRANSACTION_SERVICE_INTERVAL: ${TRANSACTION_SERVICE_INTERVAL:-5}
+    ports:
+      - "${TRANSACTION_SERVICE_PORT:-8002}:8002"
+    depends_on:
+      - location-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gen-ai-network
+
+  # pgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gen-ai-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@genai.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - gen-ai-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  gen-ai-network:
+    driver: bridge
