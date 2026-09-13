@@ -1,357 +1,196 @@
+# PIA GeoVision Analytics & Data Agent
 
-# AI & DATA Evaluation
+Solución reproducible para la evaluación de Ingeniería de Datos e IA. Integra los servicios
+proporcionados sin modificarlos y construye un servidor MCP, un agente FastAPI, un pipeline
+medallón con pandas y un dashboard Streamlit.
 
-### Contexto
+## Arquitectura
 
-Bienvenido a la evaluacion de Ingeniero de Datos e IA. Eres parte del equipo de ingeniería de **GeoAI Analytics**, una startup que proporciona análisis de ubicación contextual mediante IA a empresas de logística y retail.
-
-### El Problema
-
-A las **3:47 AM del viernes**, el agente principal de procesamiento de consultas sufrió un **fallo crítico** y quedó completamente inoperativo. El sistema de respaldo no se activó correctamente debido a una configuración errónea en producción.
-
-**Situación actual**:
-```
-✗ Failed to send transaction txn_000042: All connection attempts failed
-✗ Failed to send transaction txn_000043: All connection attempts failed  
-✗ Failed to send transaction txn_000044: All connection attempts failed
-✗ Failed to send transaction txn_000045: All connection attempts failed
-```
-
-### Tu Misión
-
-El CTO te ha asignado como **AI & Data Developer de recuperación**. Tu objetivo es construir un **agente de reemplazo funcional** que:
-
-1. Reciba las transacciones acumuladas (ya hay un servicio generador funcionando)
-2. Enriquezca cada consulta con datos de ubicación contextual (ya hay un servicio que proporciona estos datos)
-3. Analice sentimiento y urgencia con LLM (requisito del cliente)
-4. Persista los datos en la base de datos para auditoría y análisis (requisito del cliente)
-5. Genere métricas en tiempo real para el equipo de operaciones (requisito del cliente)
-
-**Deadline**: Tienes **6-8 horas** antes de la reunión con stakeholders.
-
-**Recursos disponibles**:
-- Location Service operativo (puerto 8001)
-- Transaction Generator listo (puerto 8002)
-- PostgreSQL con schema correcto (puerto 5432)
-
----
-
-# AI & Data Agent Evaluation - Simulated Services
-
-Este proyecto proporciona los **servicios simulados** necesarios para la evaluación técnica del rol de **Ingeniero de Datos e IA**. Los candidatos deben integrar estos servicios con su implementación de agente, MCP Server, pipeline ETL y dashboard.
-
-## Descripción General
-
-Este repositorio contiene:
-
-1. **Location Service** (PROPORCIONADO) - Servicio REST con datos de ubicaciones
-2. **Transaction Service** (PROPORCIONADO) - Generador de transacciones simuladas
-3. **PostgreSQL Database** - Base de datos con esquema medallón (Bronze/Silver/Gold)
-4. **Docker Compose** - Orquestación de servicios
-
-## Requisitos Previos
-
-Antes de comenzar con la evaluación, asegúrate de tener instaladas las siguientes herramientas:
-
-### 1. Python 3.10+
-
-Si no tienes Python instalado, descárgalo desde el sitio oficial:
-
-**🔗 [Descargar Python](https://www.python.org/downloads/)**
-
-Verifica la instalación:
-```bash
-python --version
-# o
-python3 --version
+```text
+Transaction Service ──POST──> Agent ──MCP──> MCP Server ──HTTP──> Location Service
+                                 │
+                                 └──> PostgreSQL Bronze
+                                           │
+                                      pandas ETL
+                                           ▼
+                                      Silver → Gold ──> Streamlit
 ```
 
-### 2. Gestor de Paquetes uv
+| Componente | Puerto | Propósito |
+|---|---:|---|
+| Agent API | 8000 | Recibe, analiza y persiste transacciones |
+| Location Service | 8001 | Fuente simulada proporcionada |
+| Transaction Service | 8002 | Generador proporcionado |
+| MCP Server | 8003 | Herramientas estandarizadas de ubicación |
+| PostgreSQL | 5432 | Capas Bronze, Silver y Gold |
+| Dashboard | 8501 | Indicadores operativos sobre Gold |
+| pgAdmin (opcional) | 5050 | Administración visual de PostgreSQL |
 
-Este proyecto utiliza **uv** como gestor de paquetes y entornos virtuales (venv).
+## Requisitos
 
-**Instalación de uv:**
+- Docker Desktop con Docker Compose.
+- Aproximadamente 3 GB libres para imágenes y volúmenes.
+- Una API key de Groq para la inferencia LLM real.
 
-```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+No es necesario instalar Python ni PostgreSQL localmente para ejecutar la solución.
 
-# Windows (PowerShell)
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+## Inicio rápido
 
-# O con pip (si prefieres)
-pip install uv
+Ejecutar desde esta carpeta:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
 ```
 
-Verifica la instalación:
-```bash
-uv --version
+Si el puerto 5432 ya está ocupado, cambiar únicamente la publicación al host antes de levantar:
+
+```powershell
+$env:POSTGRES_PORT="5433"
+docker compose up --build -d
 ```
 
-**[Documentación de uv](https://docs.astral.sh/uv/)**
+Los demás contenedores continúan conectándose internamente a PostgreSQL por el puerto 5432.
 
-### 3. Docker y Docker Compose
+El proveedor predeterminado es Groq con GPT-OSS 20B. Para cumplir el flujo con inferencia real, editar
+`.env`:
 
-Docker es **bastante recomendable pero no obligatorio**. Facilita la ejecución de los servicios proporcionados para el desarrollo de este ejercicio (Location Service, Transaction Service y PostgreSQL con las tablas pre configuradas).
-
-**Instalación de Docker:**
-
-- **macOS/Windows**: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- **Linux**: [Docker Engine](https://docs.docker.com/engine/install/)
-
-Verifica la instalación:
-```bash
-docker --version
-docker-compose --version
+```dotenv
+LLM_PROVIDER=groq
+GROQ_API_KEY=tu_clave_de_groq
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
----
+El agente consulta Groq mediante su SDK oficial, usa razonamiento medio y Structured Outputs en
+modo estricto, y vuelve a validar la respuesta con Pydantic. Ante una indisponibilidad, utiliza el
+clasificador heurístico y deja la advertencia en `raw_metadata.processing_warnings`. Una API key
+nunca debe confirmarse en Git.
 
-## Inicio Rápido
+Para una demostración completamente offline se puede establecer `LLM_PROVIDER=heuristic`.
 
-### Prerrequisitos Verificados
+## Probar el flujo
 
-Asegúrate de haber completado la sección **Requisitos Previos** antes de continuar.
+### 1. Comprobar salud
 
-### 1. Configurar variables de entorno
-
-```bash
-# Copiar variables de entorno
-cp .env.example .env
-
-# Editar .env con tus configuraciones
-nano .env
+```powershell
+Invoke-RestMethod http://localhost:8001/
+Invoke-RestMethod http://localhost:8002/status
+Invoke-RestMethod http://localhost:8000/health
+Invoke-RestMethod http://localhost:8003/health
 ```
 
-### 2. Iniciar Servicios con Docker Compose
+### 2. Enviar transacciones
 
-```bash
-# Iniciar todos los servicios
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f
-
-# Verificar estado
-docker-compose ps
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8002/send-one"
+Invoke-RestMethod -Method Post -Uri "http://localhost:8002/send-batch?count=20"
 ```
 
-### 3. Verificar Servicios
+Estos endpoints aceptan únicamente `POST`. Abrirlos desde la barra del navegador envía un `GET`
+y devuelve `405 Method Not Allowed`. Como alternativa visual, abrir
+<http://localhost:8002/docs>, seleccionar el endpoint, pulsar **Try it out** y luego **Execute**.
 
-```bash
-# Location Service
-curl http://localhost:8001/
+El pipeline se ejecuta cada 10 segundos. Abrir el dashboard en:
 
-# Transaction Service
-curl http://localhost:8002/
+<http://localhost:8501>
 
-# PostgreSQL (requiere cliente psql)
-psql -h localhost -U agent_user -d gen_ai_agent_db
+### 3. Verificar las capas
+
+```powershell
+docker compose exec postgres psql -U agent_user -d gen_ai_agent_db -c "SELECT COUNT(*) FROM agent_interactions;"
+docker compose exec postgres psql -U agent_user -d gen_ai_agent_db -c "SELECT COUNT(*) FROM enriched_transactions;"
+docker compose exec postgres psql -U agent_user -d gen_ai_agent_db -c "SELECT * FROM analytics_metrics ORDER BY metric_date DESC, total_transactions DESC;"
 ```
 
-## Servicios Proporcionados
+## Endpoints del agente
 
-### 1. Location Service (Puerto 8001)
+- `POST /transactions`: contrato consumido por Transaction Service.
+- `GET /health`: estado de PostgreSQL, MCP y configuración LLM.
+- `GET /docs`: OpenAPI interactivo.
 
-Servicio REST que proporciona datos de 12 ubicaciones globales con información contextual.
+Los duplicados por `transaction_id` se reconocen antes de insertar. Los errores de enriquecimiento
+o del proveedor LLM se preservan como advertencias; un error de persistencia produce HTTP 503 para
+no confirmar datos que no llegaron a Bronze.
 
-#### Endpoints Disponibles
+## Herramientas MCP
 
-```bash
-# Listar todas las ubicaciones
-GET http://localhost:8001/locations
+- `list_locations`
+- `get_location_by_id`
+- `get_location_by_city`
+- `get_location_by_country`
+- `get_location_by_coordinates`
 
-# Obtener ubicación por ID
-GET http://localhost:8001/locations/loc_cdmx_001
+El endpoint MCP utiliza Streamable HTTP en `http://localhost:8003/mcp` y el SDK oficial de MCP.
+Las búsquedas se realizan sobre la colección devuelta por `/locations`: esto evita depender del
+orden de rutas específicas del servicio proporcionado, sin modificar dicho servicio.
 
-# Buscar por ciudad
-GET http://localhost:8001/locations/by-city/Tokyo
+## Pipeline
 
-# Buscar por coordenadas
-GET http://localhost:8001/locations/by-coordinates?latitude=19.4326&longitude=-99.1332
+El proceso continuo realiza:
 
-# Buscar por país
-GET http://localhost:8001/locations/by-country/Mexico
+1. Bronze → Silver: carga las interacciones en pandas, aplana `raw_metadata` con
+   `json_normalize`, normaliza texto, convierte fechas y valores numéricos, valida rangos y
+   conserva los errores de calidad en `validation_errors`. Si falta el enriquecimiento, reintenta
+   la consulta MCP hasta `MAX_ENRICHMENT_ATTEMPTS` veces y actualiza la fila Silver de forma
+   idempotente.
+2. Silver → Gold: recalcula los grupos válidos por fecha y ciudad y hace `UPSERT` contra la clave
+   `(metric_date, city)`. Reejecutarlo no duplica métricas.
+
+Una ejecución manual puede lanzarse así:
+
+```powershell
+docker compose run --rm pipeline python -c "from sqlalchemy import create_engine; from pipeline.run import run_once, DATABASE_URL; print(run_once(create_engine(DATABASE_URL)))"
 ```
 
-#### Ejemplo de Respuesta
+## Calidad y pruebas
 
-```json
-{
-  "location_id": "loc_cdmx_001",
-  "city": "Ciudad de México",
-  "country": "México",
-  "latitude": 19.4326,
-  "longitude": -99.1332,
-  "timezone": "America/Mexico_City",
-  "weather": {
-    "temperature": 22,
-    "condition": "Soleado",
-    "humidity": 45,
-    "wind_speed": 12
-  },
-  "observations": [
-    "Alta densidad poblacional",
-    "Zona metropolitana",
-    "Horario pico: 7-9 AM, 6-8 PM"
-  ],
-  "demographics": {
-    "population": 9200000,
-    "language": "Español",
-    "currency": "MXN"
-  }
-}
+```powershell
+docker run --rm -v "${PWD}:/workspace" -w /workspace `
+  ghcr.io/astral-sh/uv:0.8.17-python3.11-bookworm-slim `
+  uv run --frozen --group dev pytest -q
+
+docker run --rm -v "${PWD}:/workspace" -w /workspace `
+  ghcr.io/astral-sh/uv:0.8.17-python3.11-bookworm-slim `
+  uv run --frozen --group dev ruff check .
 ```
 
+Las pruebas cubren validación del contrato, timestamps, coordenadas, clasificación multilingüe,
+fallback heurístico, normalización pandas y validación Silver, y agregaciones Gold.
 
+## Operación
 
-### 2. Transaction Service (Puerto 8002)
+Ver logs:
 
-Servicio que genera y envía transacciones simuladas al agente.
-
-#### Modos de Operación
-
-**Modo Continuo**: Envía transacciones automáticamente a intervalos regulares
-**Modo Manual**: Permite enviar transacciones bajo demanda
-
-#### Endpoints de Control
-
-```bash
-# Ver estado del servicio
-GET http://localhost:8002/status
-
-# Configurar endpoint del agente
-POST http://localhost:8002/configure
-{
-  "agent_endpoint": "http://localhost:8000/transactions",
-  "interval_seconds": 5
-}
-
-# Iniciar envío continuo
-POST http://localhost:8002/start
-
-# Detener envío continuo
-POST http://localhost:8002/stop
-
-# Enviar una transacción manual
-POST http://localhost:8002/send-one
-
-# Enviar lote de transacciones
-POST http://localhost:8002/send-batch?count=10
-
-# Reiniciar contador
-POST http://localhost:8002/reset
+```powershell
+docker compose logs -f agent mcp-server pipeline
 ```
 
-#### Formato de Transacción
+Detener sin borrar datos:
 
-```json
-{
-  "transaction_id": "txn_000001",
-  "user_id": "user_a1b2c3d4",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "query": "¿Cuál es el clima en mi ubicación?",
-  "llm_model": "gpt-4",
-  "tokens_used": 150,
-  "response_time_ms": 1200,
-  "location_metadata": {
-    "latitude": 19.4326,
-    "longitude": -99.1332,
-    "city": "Ciudad de México"
-  }
-}
+```powershell
+docker compose down
 ```
 
-### 3. PostgreSQL Database (Puerto 5432)
+Borrar también el volumen de PostgreSQL (acción destructiva):
 
-Base de datos con esquema medallón pre-configurado.
-
-#### Credenciales por Defecto
-
-```
-Host: localhost
-Port: 5432
-Database: gen_ai_agent_db
-User: agent_user
-Password: agent_password
+```powershell
+docker compose down -v
 ```
 
-#### Esquema de Tablas
+Iniciar pgAdmin opcionalmente:
 
-**Bronze Layer**: `agent_interactions` - Datos crudos del agente
-**Silver Layer**: `enriched_transactions` - Datos enriquecidos y validados
-**Gold Layer**: `analytics_metrics` - Métricas agregadas
-
-Ver detalles completos en `database/schema.sql`
-
-## Tareas del Candidato
-
-Los candidatos deben implementar este ejercicio de acuerdo al Stack manejado en la organización:
-
-### 1. MCP Server
-- Consumir el Location Service
-- Implementar y exponer herramientas MCP para el agente
-- Implementar con el SDK oficial para MCP
-
-### 2. Agente Analizador
-- Recibir transacciones en `POST /transactions`
-- Usar MCP Server para enriquecer datos
-- Persistir en PostgreSQL (tabla `agent_interactions`)
-- Implementar con FastAPI, LangGraph o LangChain
-
-### 3. Pipeline ETL
-- Bronze → Silver: Enriquecer con datos de ubicación
-- Silver → Gold: Agregar métricas
-- Implementar transformaciones para cada capa usando Python con pandas
-
-### 4. Dashboard
-- Implementar dashboard usando Streamlit con 3+ visualizaciones
-- Conectar a capa Gold
-- KPIs y gráficos analíticos
-
-## Estructura minima esperada de entrega
-
-```
-candidate-solution/                
-    ├── mcp_server/                   
-    ├── agent/                          
-    ├── pipeline/                         
-    ├── dashboard/
-    ├── docker-compose.yml                  (Orquestación completa de componentes del sistema SIN modificar los servicios proporcionados.)
-    ├── pyproject.toml                        
-    └── README.md                           (Breve documentación de la implementación y ejecución del sistema cubriendo el objetivo del ejercicio)
+```powershell
+docker compose --profile tools up -d pgadmin
 ```
 
-## El candidato NO debe modificar:
+## Decisiones técnicas
 
-- transaction_service/
-- location_service/ 
-- Dockerfile.location-service
-- Dockerfile.transaction-service
-- database/
-
-Estos componentes son proporcionados por el evaluador.
-La implementación debe desarrollarse dentro de candidate-solution.
-La solución debe ser completamente reproducible. El evaluador debe poder ejecutar:
-
-```bash
-docker compose up --build
-```
-
-Una vez desplegada la solución, el evaluador deberá poder:
-
-- Ejecutar el flujo completo de procesamiento de transacciones con los servicios proporcionados.
-- Validar la persistencia de información en PostgreSQL en el esquema de base de datos proporcionado.
-- Acceder al dashboard y visualizar los indicadores, métricas y gráficos construidos sobre la capa Gold.
-
-
-## Recursos sobre el Stack indicado
-
-- [Documentación de uv](https://docs.astral.sh/uv/)
-- [Documentación de MCP](https://modelcontextprotocol.io/)
-- [LangChain Documentation](https://python.langchain.com/)
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Streamlit Documentation](https://docs.streamlit.io/)
-
-
+- Dependencias fijadas y lockfile para builds repetibles.
+- Procesos sin privilegios dentro del contenedor.
+- Health checks y orden de arranque basado en salud.
+- Configuración tipo twelve-factor mediante variables de entorno.
+- Timeouts, reintentos acotados y logs estructurados por evento.
+- Validación Pydantic en el borde de entrada.
+- SQL parametrizado y transacciones atómicas.
+- Dashboard desacoplado que consulta solamente Gold.
